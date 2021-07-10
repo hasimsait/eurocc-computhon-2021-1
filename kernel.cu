@@ -16,10 +16,10 @@ inline void gpuAssert(cudaError_t code, const char *file, int line,
 // Error check
 // Copied from Kamer Kaya's homeworks.
 
-__global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values){
+__global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values, int chunk_start){
     // it probably is a better idea to do it per edge instead of per node.
     // or put 1 union in shared memory and do one block per node.
-    int u= blockDim.x*blockIdx.x+threadIdx.x;
+    int u= blockDim.x*blockIdx.x+threadIdx.x+chunk_start;
     if (u<*nov){
         bool *uv_union = new bool[n];
         // instead of unordered set, keep an array of size n
@@ -57,7 +57,6 @@ void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // PUT THE DATA
         cudaSetDevice(device_id);
-        int chunkStart=device_id*chunk_size;
         cudaMalloc((void **)&d_xadj,(n+1)*sizeof(int));
         cudaMalloc((void **)&d_adj,nnz*sizeof(int));
         cudaMalloc((void **)&d_nov,sizeof(int));
@@ -75,8 +74,9 @@ void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
     cudaEventRecord(start, 0);
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // DO THE COMPUTATION
+        int chunk_start=device_id*chunk_size;
         cudaSetDevice(device_id);
-        jaccard<<<(chunk_size+THREADS-1)/THREADS, THREADS>>>(int *d_xadj, int *d_adj, int *d_nov, float *d_jaccard_values){
+        jaccard<<<(chunk_size+THREADS-1)/THREADS, THREADS>>>(d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start){
     }
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // GET THE VALUES
