@@ -50,6 +50,9 @@ void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
 {
     int *d_xadj, *d_adj, *d_nov;
     float* d_jaccard_values;
+    int *devices_count;
+    cudaGetDeviceCount(devices_count);
+    
     int chunk_size=(n+devices_count-1)/devices_count; //the unbalanced graph will hurt.
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // PUT THE DATA
@@ -72,16 +75,19 @@ void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
     cudaEventRecord(start, 0);
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // DO THE COMPUTATION
-        jaccard<<<(chunk_size+THREADS-1)/THREADS, THREADS>>>(int *xadj, int *adj, int *nov, float *jaccard_values){
+        cudaSetDevice(device_id);
+        jaccard<<<(chunk_size+THREADS-1)/THREADS, THREADS>>>(int *d_xadj, int *d_adj, int *d_nov, float *d_jaccard_values){
     }
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
         // GET THE VALUES
+        cudaSetDevice(device_id);
         gpuErrchk(cudaDeviceSynchronize());
     }
     cudaEventCreate(&stop);
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
+        cudaSetDevice(device_id);
         cudaMemcpy(jaccard_values, d_jaccard_values, nnz * sizeof(float), cudaMemcpyDeviceToHost);
         //this must be a reduce, not simple copy unfortunately.
     }
@@ -91,6 +97,7 @@ void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
     cudaEventElapsedTime(&elapsedTime, start, stop);
     printf("GPU took: %f s\n", elapsedTime / 1000);
     for (unsigned int device_id = 0; device_id < devices_count; device_id++){
+        cudaSetDevice(device_id);
         cudaFree(d_xadj);
         cudaFree(d_adj);
         cudaFree(d_nov);
