@@ -49,15 +49,17 @@ int main(int argc, char *argv[]) {
   {
     // instead of unordered set, keep an array of size n
     bool *uv_union = new bool[n];
-    //uv_union is thread private.
+    // uv_union is thread private.
     memset(uv_union, false, n * sizeof(bool));
 #pragma omp for schedule(dynamic)
+    // dynamic scheduling (chunk size changes, which thread is assigned which
+    // iters changes etc.) is slower than static on ideal graphs
+    // but the graphs are not balanced.
     for (int u = 0; u < n; u++) {
       for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
         uv_union[adj[v_ptr]] = true;
-        // set every neighbour of u to 1.
+        // set every neighbour of u to true.
       }
-
       for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
         // for every neighbour v of u
         if (adj[v_ptr] > u) {
@@ -71,9 +73,10 @@ int main(int argc, char *argv[]) {
               num_intersections++;
             } else {
               num_uncommon++;
+              if (adj[i] == u)
+                // find v-u edge
+                symetric_v_ptr = i;
             }
-            if (adj[i] == u)
-              symetric_v_ptr = i; // find v-u edge
           }
           int card_u = xadj[u + 1] - xadj[u];
           jaccard_values[v_ptr] =
@@ -83,8 +86,8 @@ int main(int argc, char *argv[]) {
         }
       }
       for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-        uv_union[adj[v_ptr]] = false;
         // set every neighbour of u back to false for the next node.
+        uv_union[adj[v_ptr]] = false;
       }
     }
   }

@@ -67,9 +67,9 @@ int main(int argc, char *argv[]) {
             num_intersections++;
           } else {
             num_uncommon++;
+            if (adj[i] == u)
+              symetric_v_ptr = i; // find v-u edge
           }
-          if (adj[i] == u)
-            symetric_v_ptr = i; // find v-u edge
         }
         int card_u = xadj[u + 1] - xadj[u];
         jaccard_values[v_ptr] =
