@@ -45,12 +45,14 @@ int main(int argc, char *argv[]) {
 
   auto start = chrono::steady_clock::now();
   //////BEGIN CALCULATION CODE
-
-#pragma omp parallel for schedule(dynamic) // firstprivate(uv_union)
+  // instead of unordered set, keep an array of size n
+  bool *uv_union_g = new bool[n*omp_get_num_threads()];
+  //the offset for each thread should be n*thread index.
+  cout << "done with global"<<endl;
+#pragma omp parallel for schedule(dynamic)
   for (int u = 0; u < n; u++) {
-    bool *uv_union = new bool[n];
-    // instead of unordered set, keep an array of size n
-    memset(uv_union, false, n * sizeof(bool)); // just to be safe
+  bool * uv_union = &uv_union_g[n*omp_get_thread_num()];
+  //bool * uv_union = uv_union_g + n * omp_get_thread_num() * sizeof(bool); 
     for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
       uv_union[adj[v_ptr]] = true;
       // set every neighbour of u to 1.
@@ -80,7 +82,10 @@ int main(int argc, char *argv[]) {
             float(num_intersections) / float(card_u + num_uncommon);
       }
     }
-    delete[] uv_union;
+    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+      uv_union[adj[v_ptr]] = false;
+      // set every neighbour of u back to false.
+    }
   }
   //////END CALCULATION CODE
   auto end = chrono::steady_clock::now();
