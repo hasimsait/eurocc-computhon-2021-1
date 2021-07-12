@@ -47,9 +47,8 @@ int main(int argc, char *argv[]) {
   //////BEGIN CALCULATION CODE
   bool *uv_union =
       new bool[n]; // instead of unordered set, keep an array of size n
-
+  memset(uv_union, false, n * sizeof(bool)); // just to be safe
   for (int u = 0; u < n; u++) {
-    memset(uv_union, false, n * sizeof(bool)); // just to be safe
     for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
       uv_union[adj[v_ptr]] = true;
       // set every neighbour of u to 1.
@@ -78,6 +77,10 @@ int main(int argc, char *argv[]) {
         jaccard_values[symetric_v_ptr] =
             float(num_intersections) / float(card_u + num_uncommon);
       }
+    }
+    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+      uv_union[adj[v_ptr]] = false;
+      // clean the array.
     }
   }
   //////END CALCULATION CODE

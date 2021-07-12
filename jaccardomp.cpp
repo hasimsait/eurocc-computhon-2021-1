@@ -45,46 +45,47 @@ int main(int argc, char *argv[]) {
 
   auto start = chrono::steady_clock::now();
   //////BEGIN CALCULATION CODE
-  // instead of unordered set, keep an array of size n
-  bool *uv_union_g = new bool[n*omp_get_num_threads()];
-  //the offset for each thread should be n*thread index.
-  cout << "done with global"<<endl;
-#pragma omp parallel for schedule(dynamic)
-  for (int u = 0; u < n; u++) {
-  bool * uv_union = &uv_union_g[n*omp_get_thread_num()];
-  //bool * uv_union = uv_union_g + n * omp_get_thread_num() * sizeof(bool); 
-    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-      uv_union[adj[v_ptr]] = true;
-      // set every neighbour of u to 1.
-    }
-
-    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-      // for every neighbour v of u
-      if (adj[v_ptr] > u) {
-        // do not waste time with 3-1, 1-3 calculates that.
-        int num_intersections = 0;
-        int num_uncommon = 0; // V/U, so we can calculate ||U U V||
-        int symetric_v_ptr = 0;
-        for (int i = xadj[adj[v_ptr]]; i < xadj[adj[v_ptr] + 1]; i++) {
-          // for every neighbour i of v
-          if (uv_union[adj[i]]) {
-            num_intersections++;
-          } else {
-            num_uncommon++;
-          }
-          if (adj[i] == u)
-            symetric_v_ptr = i; // find v-u edge
-        }
-        int card_u = xadj[u + 1] - xadj[u];
-        jaccard_values[v_ptr] =
-            float(num_intersections) / float(card_u + num_uncommon);
-        jaccard_values[symetric_v_ptr] =
-            float(num_intersections) / float(card_u + num_uncommon);
+#pragma omp parallel
+  {
+    // instead of unordered set, keep an array of size n
+    bool *uv_union = new bool[n];
+    //uv_union is thread private.
+    memset(uv_union, false, n * sizeof(bool));
+#pragma omp for schedule(dynamic)
+    for (int u = 0; u < n; u++) {
+      for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+        uv_union[adj[v_ptr]] = true;
+        // set every neighbour of u to 1.
       }
-    }
-    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-      uv_union[adj[v_ptr]] = false;
-      // set every neighbour of u back to false.
+
+      for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+        // for every neighbour v of u
+        if (adj[v_ptr] > u) {
+          // do not waste time with 3-1, 1-3 calculates that.
+          int num_intersections = 0;
+          int num_uncommon = 0; // V/U, so we can calculate ||U U V||
+          int symetric_v_ptr = 0;
+          for (int i = xadj[adj[v_ptr]]; i < xadj[adj[v_ptr] + 1]; i++) {
+            // for every neighbour i of v
+            if (uv_union[adj[i]]) {
+              num_intersections++;
+            } else {
+              num_uncommon++;
+            }
+            if (adj[i] == u)
+              symetric_v_ptr = i; // find v-u edge
+          }
+          int card_u = xadj[u + 1] - xadj[u];
+          jaccard_values[v_ptr] =
+              float(num_intersections) / float(card_u + num_uncommon);
+          jaccard_values[symetric_v_ptr] =
+              float(num_intersections) / float(card_u + num_uncommon);
+        }
+      }
+      for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+        uv_union[adj[v_ptr]] = false;
+        // set every neighbour of u back to false for the next node.
+      }
     }
   }
   //////END CALCULATION CODE
