@@ -34,5 +34,8 @@
 # Input/Output Files
 *.txt
 
+# Funny Windows Stuff
+*.pdb
+*.exp
 .vscode/
 .vs/
