@@ -1,4 +1,19 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <omp.h>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+using namespace std;
+
 #define THREADS 64
 
 // Error check
@@ -16,92 +31,221 @@ inline void gpuAssert(cudaError_t code, const char *file, int line,
 // Error check
 // Copied from Kamer Kaya's homeworks.
 
-__global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values, int chunk_start){
-    // it probably is a better idea to do it per edge instead of per node.
-    // or put 1 union in shared memory and do one block per node.
-    int u= blockDim.x*blockIdx.x+threadIdx.x+chunk_start;
-    if (u<*nov){
-        bool *uv_union = new bool[n];
-        // instead of unordered set, keep an array of size n
-        // it will not fit in thread private memory. I know it from the 406 project.
-        memset(uv_union, false, n * sizeof(bool)); //just to be safe
-        for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++){
-            uv_union[adj[v_ptr]] = true;
-            //set every neighbour of u to 1.
-        }
-        for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++){
-            //for every neighbour v of u            
-            int num_intersections = 0;
-            int symetric_v_ptr=0;
-            for (int i = xadj[v_ptr]; i < xadj[v_ptr + 1]; v_ptr++){
-                //for every neighbour i of v
-                if (uv_union[adj[i]])
-                    num_intersections++;
-            }
-            int card_u = xadj[u + 1] - xadj[u];         //can be -+1 not sure.
-            int card_v = xadj[v_ptr + 1] - xadj[v_ptr]; //can be -+1 not sure.
-            jaccard_values[v_ptr] = float(num_intersections) / float(card_u + card_v);
-        }
+__global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values,
+                        int chunk_start) {
+  // it probably is a better idea to do it per edge instead of per node.
+  // or put 1 union in shared memory and do one block per node.
+  int u = blockDim.x * blockIdx.x + threadIdx.x + chunk_start;
+  if (u < *nov) {
+    bool *uv_union = new bool[*nov];
+    // instead of unordered set, keep an array of size n
+    memset(uv_union, false, (*nov) * sizeof(bool)); // just to be safe
+    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+      uv_union[adj[v_ptr]] = true;
+      // set every neighbour of u to 1.
     }
-    return;
+    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+      // for every neighbour v of u
+      int num_intersections = 0;
+      int num_uncommon = 0; // V/U, so we can calculate ||U U V||
+      for (int i = xadj[adj[v_ptr]]; i < xadj[adj[v_ptr] + 1]; i++) {
+        // for every neighbour i of v
+        if (uv_union[adj[i]]) {
+          num_intersections++;
+        } else {
+          num_uncommon++;
+        }
+      }
+      int card_u = xadj[u + 1] - xadj[u];
+      jaccard_values[v_ptr] =
+          float(num_intersections) / float(card_u + num_uncommon);
+    }
+  }
 }
+void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
+  int *d_xadj, *d_adj, *d_nov;
+  float *d_jaccard_values;
+  int *devices_count;
+  *devices_count = 1;
+  // cudaGetDeviceCount(&devices_count); //truba doesn't like this.
 
-void wrapper(int n,int nnz, int* xadj, int* adj, float* jaccard_values)
-{
-    int *d_xadj, *d_adj, *d_nov;
-    float* d_jaccard_values;
-    int *devices_count;
-    cudaGetDeviceCount(devices_count);
-    
-    int chunk_size=(n+devices_count-1)/devices_count; //the unbalanced graph will hurt.
-    for (unsigned int device_id = 0; device_id < devices_count; device_id++){
-        // PUT THE DATA
-        cudaSetDevice(device_id);
-        cudaMalloc((void **)&d_xadj,(n+1)*sizeof(int));
-        cudaMalloc((void **)&d_adj,nnz*sizeof(int));
-        cudaMalloc((void **)&d_nov,sizeof(int));
-        cudaMalloc((void **)&d_jaccard_values,nnz*sizeof(float));
-        cudaMemcpy(d_xadj, xadj, (*nov + 1) * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_adj, adj, (nnz) * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_nov, &n, sizeof(int), cudaMemcpyHostToDevice);
-        gpuErrchk(cudaDeviceSynchronize());
-        #ifdef DEBUG
-          std::cout << "malloc copy done" << std::endl;
-        #endif
-    }
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventRecord(start, 0);
-    for (unsigned int device_id = 0; device_id < devices_count; device_id++){
-        // DO THE COMPUTATION
-        int chunk_start=device_id*chunk_size;
-        cudaSetDevice(device_id);
-        jaccard<<<(chunk_size+THREADS-1)/THREADS, THREADS>>>(d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start){
-    }
-    for (unsigned int device_id = 0; device_id < devices_count; device_id++){
-        // GET THE VALUES
-        cudaSetDevice(device_id);
-        gpuErrchk(cudaDeviceSynchronize());
+  int chunk_size = ceil((n + (*devices_count) - 1) / (*devices_count));
+  // the unbalanced graph will hurt.
+  for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+    // PUT THE DATA
+    cudaSetDevice(device_id);
+    cudaMalloc((void **)&d_xadj, (n + 1) * sizeof(int));
+    cudaMalloc((void **)&d_adj, nnz * sizeof(int));
+    cudaMalloc((void **)&d_nov, sizeof(int));
+    cudaMalloc((void **)&d_jaccard_values, nnz * sizeof(float));
+    cudaMemcpy(d_xadj, xadj, (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_adj, adj, (nnz) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_nov, &n, sizeof(int), cudaMemcpyHostToDevice);
+    gpuErrchk(cudaDeviceSynchronize());
+#ifdef DEBUG
+    std::cout << "malloc copy done" << std::endl;
+#endif
+  }
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventRecord(start, 0);
+  for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+    // DO THE COMPUTATION
+    int chunk_start = device_id * chunk_size;
+    cudaSetDevice(device_id);
+    jaccard<<<(chunk_size + THREADS - 1) / THREADS, THREADS>>>(
+        d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start);
+    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+      // GET THE VALUES
+      cudaSetDevice(device_id);
+      gpuErrchk(cudaDeviceSynchronize());
     }
     cudaEventCreate(&stop);
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
-    for (unsigned int device_id = 0; device_id < devices_count; device_id++){
-        cudaSetDevice(device_id);
-        cudaMemcpy(jaccard_values, d_jaccard_values, nnz * sizeof(float), cudaMemcpyDeviceToHost);
-        //this must be a reduce, not simple copy unfortunately.
+    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+      cudaSetDevice(device_id);
+      float *jacc_tmp = new float[nnz];
+      cudaMemcpy(jacc_tmp, d_jaccard_values, nnz * sizeof(float),
+                 cudaMemcpyDeviceToHost);
+      for (int i = 0; i < nnz; i++) {
+        // number of iterations can be reduced, start from the first edge of the
+        // chunk, end with the last edge.
+        if (jacc_tmp[i] != 0)
+          jaccard_values[i] = jacc_tmp[i];
+      }
     }
-    for (int i = 0; i < *nov; i++)
-        printf("%d %d\n", i, ct[i]);
     float elapsedTime;
     cudaEventElapsedTime(&elapsedTime, start, stop);
     printf("GPU took: %f s\n", elapsedTime / 1000);
-    for (unsigned int device_id = 0; device_id < devices_count; device_id++){
-        cudaSetDevice(device_id);
-        cudaFree(d_xadj);
-        cudaFree(d_adj);
-        cudaFree(d_nov);
-        cudaFree(d_jaccard_values);
-    }    
+    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+      cudaSetDevice(device_id);
+      cudaFree(d_xadj);
+      cudaFree(d_adj);
+      cudaFree(d_nov);
+      cudaFree(d_jaccard_values);
+    }
     return;
+  }
+}
+
+struct CSR {
+  int _n;
+  int _m;
+  int *_xadj;
+  int *_adj;
+  int *_is;
+  CSR(int n, int m, int *xadj, int *adj, int *is)
+      : _n(n), _m(m), _xadj(xadj), _adj(adj), _is(is) {}
+};
+
+CSR create_csr_from_file(string filename);
+void print_jaccards(string filename, int n, int *xadj, int *adj, float *jacc);
+
+int main(int argc, char *argv[]) {
+  if (argc < 3) {
+    cout << "Parameters: input_file output_file\n";
+    return 1;
+  }
+  string input_file = argv[1];
+  string output_file = argv[2];
+
+  CSR graph =
+      create_csr_from_file(input_file); // Creates a graph in the Compressed
+                                        // Sparse Row format from the input file
+  int n = graph._n, m = graph._m, *xadj = graph._xadj, *adj = graph._adj,
+      *is = graph._is;
+  cout << "Read the graph into CSR format" << endl;
+
+  float *jaccard_values = new float[m];
+  // jaccard_values[j] = Jaccard between vertices (a, b) where adj[j] = b and
+  // adj[a] < j < adj[a+1] i.e. the edge located in index j of the adj array
+
+  auto start = chrono::steady_clock::now();
+  //////BEGIN CALCULATION CODE
+  wrapper(n, m, xadj, adj, jaccard_values);
+  //////END CALCULATION CODE
+  auto end = chrono::steady_clock::now();
+  auto diff = end - start;
+
+  cout << "Finished calculating the Jaccards in "
+       << chrono::duration<double>(diff).count() << " seconds" << endl;
+
+  // print_jaccards(output_file, n, xadj, adj, jaccard_values);
+  cout << "Finished printing the Jaccards" << endl;
+
+  return 0;
+}
+
+void print_jaccards(string output_file, int n, int *xadj, int *adj,
+                    float *jacc) {
+  ofstream fout(output_file);
+  // Save flags/precision.
+  ios_base::fmtflags oldflags = cout.flags();
+  streamsize oldprecision = cout.precision();
+
+  cout << fixed;
+  for (int u = 0; u < n; u++) {
+    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
+      fout << "(" << u << ", " << adj[v_ptr] << "): " << fixed
+           << setprecision(3) << jacc[v_ptr] << endl;
+      std::cout.flags(oldflags);
+      std::cout.precision(oldprecision);
+    }
+  }
+}
+
+CSR create_csr_from_file(string filename) {
+  ifstream fin(filename);
+  if (fin.fail()) {
+    cout << "Failed to open graph file\n";
+    throw -1;
+  }
+  int n = 0, m = 0, *xadj, *adj, *is;
+
+  fin >> n >> m;
+  vector<vector<int>> edge_list(n);
+  int u, v;
+  int read_edges = 0;
+  while (fin >> u >> v) {
+    if (u < 0) {
+      cout << "Invalid vertex ID - negative ID found: " << u << endl;
+      throw -2;
+    }
+    if (u >= n) {
+      cout << "Invalid vertex ID - vertex ID > number of edges found. VID: "
+           << u << " and n: " << n << endl;
+      throw -2;
+    }
+    edge_list[u].push_back(v);
+    read_edges += 1;
+  }
+  if (read_edges != m) {
+    cout << "The edge list file specifies there are " << m
+         << " edges but it contained " << read_edges << "instead" << endl;
+    throw -3;
+  }
+
+  /////// If CSR is sorted
+  for (auto &edges : edge_list) {
+    sort(edges.begin(), edges.end());
+  }
+  ///////
+  xadj = new int[n + 1];
+  adj = new int[m];
+  is = new int[m];
+  int counter = 0;
+  for (int i = 0; i < n; i++) {
+    xadj[i] = counter;
+    copy(edge_list[i].begin(), edge_list[i].end(), adj + counter);
+    counter += edge_list[i].size();
+  }
+  xadj[n] = counter;
+  for (int i = 0; i < n; i++) {
+    for (int j = xadj[i]; j < xadj[i + 1]; j++) {
+      is[j] = i;
+    }
+  }
+  CSR graph(n, m, xadj, adj, is);
+  return graph;
 }
