@@ -52,6 +52,9 @@ int main(int argc, char *argv[]) {
     // uv_union is thread private.
     memset(uv_union, false, n * sizeof(bool));
 #pragma omp for schedule(dynamic)
+    // TODO test if schedule(runtime) performs better with 40 threads,
+    // results are within margin of error with 8 threads.
+
     // dynamic scheduling (chunk size changes, which thread is assigned which
     // iters changes etc.) is slower than static on ideal graphs
     // but the graphs are not balanced.
@@ -98,7 +101,7 @@ int main(int argc, char *argv[]) {
   cout << "Finished calculating the Jaccards in "
        << chrono::duration<double>(diff).count() << " seconds" << endl;
 
-  print_jaccards(output_file, n, xadj, adj, jaccard_values);
+  //print_jaccards(output_file, n, xadj, adj, jaccard_values);
   cout << "Finished printing the Jaccards" << endl;
 
   return 0;

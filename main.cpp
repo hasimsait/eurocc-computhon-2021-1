@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
   cout << "Finished calculating the Jaccards in "
        << chrono::duration<double>(diff).count() << " seconds" << endl;
 
-  print_jaccards(output_file, n, xadj, adj, jaccard_values);
+  //print_jaccards(output_file, n, xadj, adj, jaccard_values);
   cout << "Finished printing the Jaccards" << endl;
 
   return 0;
