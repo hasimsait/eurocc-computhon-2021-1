@@ -42,7 +42,7 @@ int main() {
 
 	string input_file;
 	string output_file;
-
+	/*visual studio sucks*/
 	cin >> input_file;
 	cin >> output_file;
 
