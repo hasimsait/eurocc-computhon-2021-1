@@ -135,9 +135,9 @@ int main() {
 					}
 				}
 				int card_u = new_xadj[u + 1] - new_xadj[u];
-				jaccard_values[v_ptr] = 
+				jaccard_values[edge_transform[v_ptr]] = 
 					float(num_intersections) / float(card_u + num_uncommon);
-				jaccard_values[symetric_v_ptr] =
+				jaccard_values[edge_transform[symetric_v_ptr]] =
 					float(num_intersections) / float(card_u + num_uncommon);
 			}
 		}
