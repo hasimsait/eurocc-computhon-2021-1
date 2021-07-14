@@ -37,41 +37,42 @@ __global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values,
   // or put 1 union in shared memory and do one block per node.
   int u = blockDim.x * blockIdx.x + threadIdx.x + chunk_start;
   if (u < *nov) {
-    bool *uv_union = new bool[*nov];
-    // instead of unordered set, keep an array of size n
-    memset(uv_union, false, (*nov) * sizeof(bool)); // just to be safe
     for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-      uv_union[adj[v_ptr]] = true;
-      // set every neighbour of u to 1.
-    }
-    for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
-      // for every neighbour v of u
+      int v = adj[v_ptr]; // v is a neighbor of u
       int num_intersections = 0;
-      int num_uncommon = 0; // V/U, so we can calculate ||U U V||
-      for (int i = xadj[adj[v_ptr]]; i < xadj[adj[v_ptr] + 1]; i++) {
-        // for every neighbour i of v
-        if (uv_union[adj[i]]) {
-          num_intersections++;
-        } else {
-          num_uncommon++;
+
+      for (int u_nbr_ptr = xadj[u]; u_nbr_ptr < xadj[u + 1]; u_nbr_ptr++) { 
+        // Go over all neighbors of u
+        int u_nbr = adj[u_nbr_ptr];
+        for (int v_nbr_ptr = xadj[v]; v_nbr_ptr < xadj[v + 1]; v_nbr_ptr++) {
+          // Go over all neighbors of v
+          int v_nbr = adj[v_nbr_ptr];
+          if (u_nbr == v_nbr) { 
+            // Neighbors of u and v match. Increment the intersections
+            num_intersections++;
+          }
         }
       }
-      int card_u = xadj[u + 1] - xadj[u];
-      jaccard_values[v_ptr] =
-          float(num_intersections) / float(card_u + num_uncommon);
+      int num_union = xadj[u+1]-xadj[u] + xadj[v+1] - xadj[v] - num_intersections;
+      // ||X U Y|| = ||X|| + ||Y|| - ||X kesisim Y||
+      jaccard_values[v_ptr] = float(num_intersections) / float(num_union);
     }
   }
 }
 void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
   int *d_xadj, *d_adj, *d_nov;
   float *d_jaccard_values;
-  int *devices_count;
-  *devices_count = 1;
+  int devices_count=1;
   // cudaGetDeviceCount(&devices_count); //truba doesn't like this.
+  int max_conn=0;
+  for (int i=0; i<n; i++){
+    if ((xadj[i+1]-xadj[i])>max_conn)
+      max_conn = xadj[i+1]-xadj[i];
+  }
 
-  int chunk_size = ceil((n + (*devices_count) - 1) / (*devices_count));
+  int chunk_size = ceil(((n*max_conn) + (devices_count) - 1) / (devices_count));
   // the unbalanced graph will hurt.
-  for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+  for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
     // PUT THE DATA
     cudaSetDevice(device_id);
     cudaMalloc((void **)&d_xadj, (n + 1) * sizeof(int));
@@ -89,13 +90,14 @@ void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventRecord(start, 0);
-  for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+  /* TODO launch n*max_conn kernels where each kernel is assigned to an edge. Each block is 1 node, place union array in shared memory.*/
+  for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
     // DO THE COMPUTATION
     int chunk_start = device_id * chunk_size;
     cudaSetDevice(device_id);
     jaccard<<<(chunk_size + THREADS - 1) / THREADS, THREADS>>>(
         d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start);
-    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+    for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
       // GET THE VALUES
       cudaSetDevice(device_id);
       gpuErrchk(cudaDeviceSynchronize());
@@ -103,7 +105,7 @@ void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
     cudaEventCreate(&stop);
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
-    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+    for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
       cudaSetDevice(device_id);
       float *jacc_tmp = new float[nnz];
       cudaMemcpy(jacc_tmp, d_jaccard_values, nnz * sizeof(float),
@@ -118,7 +120,7 @@ void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
     float elapsedTime;
     cudaEventElapsedTime(&elapsedTime, start, stop);
     printf("GPU took: %f s\n", elapsedTime / 1000);
-    for (unsigned int device_id = 0; device_id < *devices_count; device_id++) {
+    for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
       cudaSetDevice(device_id);
       cudaFree(d_xadj);
       cudaFree(d_adj);
@@ -171,7 +173,7 @@ int main(int argc, char *argv[]) {
   cout << "Finished calculating the Jaccards in "
        << chrono::duration<double>(diff).count() << " seconds" << endl;
 
-  // print_jaccards(output_file, n, xadj, adj, jaccard_values);
+  print_jaccards(output_file, n, xadj, adj, jaccard_values);
   cout << "Finished printing the Jaccards" << endl;
 
   return 0;
