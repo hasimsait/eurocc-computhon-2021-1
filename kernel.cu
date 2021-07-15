@@ -41,13 +41,13 @@ __global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values,
       int v = adj[v_ptr]; // v is a neighbor of u
       int num_intersections = 0;
 
-      for (int u_nbr_ptr = xadj[u]; u_nbr_ptr < xadj[u + 1]; u_nbr_ptr++) { 
+      for (int u_nbr_ptr = xadj[u]; u_nbr_ptr < xadj[u + 1]; u_nbr_ptr++) {
         // Go over all neighbors of u
         int u_nbr = adj[u_nbr_ptr];
         for (int v_nbr_ptr = xadj[v]; v_nbr_ptr < xadj[v + 1]; v_nbr_ptr++) {
           // Go over all neighbors of v
           int v_nbr = adj[v_nbr_ptr];
-          if (u_nbr == v_nbr) { 
+          if (u_nbr == v_nbr) {
             // Neighbors of u and v match. Increment the intersections
             num_intersections++;
           }
@@ -90,7 +90,8 @@ void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventRecord(start, 0);
-  /* TODO launch n*max_conn kernels where each kernel is assigned to an edge. Each block is 1 node, place union array in shared memory.*/
+  /* TODO launch n*max_conn kernels where each kernel is assigned to an edge. Each block is 1 node, place union arra
+y in shared memory.*/
   for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
     // DO THE COMPUTATION
     int chunk_start = device_id * chunk_size;
@@ -113,7 +114,7 @@ void wrapper(int n, int nnz, int *xadj, int *adj, float *jaccard_values) {
       for (int i = 0; i < nnz; i++) {
         // number of iterations can be reduced, start from the first edge of the
         // chunk, end with the last edge.
-        if (jacc_tmp[i] != 0)
+        if (jacc_tmp[i] > 0 && jacc_tmp[i]<1)
           jaccard_values[i] = jacc_tmp[i];
       }
     }
@@ -162,7 +163,7 @@ int main(int argc, char *argv[]) {
   float *jaccard_values = new float[m];
   // jaccard_values[j] = Jaccard between vertices (a, b) where adj[j] = b and
   // adj[a] < j < adj[a+1] i.e. the edge located in index j of the adj array
-
+  memset(jaccard_values,0,m*sizeof(float));//-0 +0 stuff happens.
   auto start = chrono::steady_clock::now();
   //////BEGIN CALCULATION CODE
   wrapper(n, m, xadj, adj, jaccard_values);
@@ -193,37 +194,6 @@ void print_jaccards(string output_file, int n, int *xadj, int *adj,
            << setprecision(3) << jacc[v_ptr] << endl;
       std::cout.flags(oldflags);
       std::cout.precision(oldprecision);
-    }
-  }
-}
-
-CSR create_csr_from_file(string filename) {
-  ifstream fin(filename);
-  if (fin.fail()) {
-    cout << "Failed to open graph file\n";
-    throw -1;
-  }
-  int n = 0, m = 0, *xadj, *adj, *is;
-
-  fin >> n >> m;
-  vector<vector<int>> edge_list(n);
-  int u, v;
-  int read_edges = 0;
-  while (fin >> u >> v) {
-    if (u < 0) {
-      cout << "Invalid vertex ID - negative ID found: " << u << endl;
-      throw -2;
-    }
-    if (u >= n) {
-      cout << "Invalid vertex ID - vertex ID > number of edges found. VID: "
-           << u << " and n: " << n << endl;
-      throw -2;
-    }
-    edge_list[u].push_back(v);
-    read_edges += 1;
-  }
-  if (read_edges != m) {
-    cout << "The edge list file specifies there are " << m
          << " edges but it contained " << read_edges << "instead" << endl;
     throw -3;
   }
