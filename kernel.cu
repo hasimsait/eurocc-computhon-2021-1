@@ -14,7 +14,7 @@
 
 using namespace std;
 
-#define THREADS 64
+#define THREADS 1024
 
 // Error check
 #define gpuErrchk(ans)                                                         \
@@ -34,7 +34,6 @@ inline void gpuAssert(cudaError_t code, const char *file, int line,
 __global__ void jaccard(int *xadj, int *adj, int *nov, float *jaccard_values,
                         int chunk_start) {
   // it probably is a better idea to do it per edge instead of per node.
-  // or put 1 union in shared memory and do one block per node.
   int u = blockDim.x * blockIdx.x + threadIdx.x + chunk_start;
   if (u < *nov) {
     for (int v_ptr = xadj[u]; v_ptr < xadj[u + 1]; v_ptr++) {
@@ -97,7 +96,8 @@ y in shared memory.*/
     int chunk_start = device_id * chunk_size;
     cudaSetDevice(device_id);
     jaccard<<<(chunk_size + THREADS - 1) / THREADS, THREADS>>>(
-        d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start);
+  d_xadj, d_adj, d_nov, d_jaccard_values, chunk_start);
+    }
     for (unsigned int device_id = 0; device_id < devices_count; device_id++) {
       // GET THE VALUES
       cudaSetDevice(device_id);
@@ -129,7 +129,6 @@ y in shared memory.*/
       cudaFree(d_jaccard_values);
     }
     return;
-  }
 }
 
 struct CSR {
@@ -194,6 +193,37 @@ void print_jaccards(string output_file, int n, int *xadj, int *adj,
            << setprecision(3) << jacc[v_ptr] << endl;
       std::cout.flags(oldflags);
       std::cout.precision(oldprecision);
+    }
+  }
+}
+
+CSR create_csr_from_file(string filename) {
+  ifstream fin(filename);
+  if (fin.fail()) {
+    cout << "Failed to open graph file\n";
+    throw -1;
+  }
+  int n = 0, m = 0, *xadj, *adj, *is;
+
+  fin >> n >> m;
+  vector<vector<int>> edge_list(n);
+  int u, v;
+  int read_edges = 0;
+  while (fin >> u >> v) {
+    if (u < 0) {
+      cout << "Invalid vertex ID - negative ID found: " << u << endl;
+      throw -2;
+    }
+    if (u >= n) {
+      cout << "Invalid vertex ID - vertex ID > number of edges found. VID: "
+           << u << " and n: " << n << endl;
+      throw -2;
+    }
+    edge_list[u].push_back(v);
+    read_edges += 1;
+  }
+  if (read_edges != m) {
+    cout << "The edge list file specifies there are " << m
          << " edges but it contained " << read_edges << "instead" << endl;
     throw -3;
   }

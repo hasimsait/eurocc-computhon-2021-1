@@ -1,13 +1,15 @@
-Eurocc Computhon 2021-1 Team Musilaj
+Eurocc Computhon 2021-1
 
-Results on i7 7700hq:
-| graph    |     t=1 | OMP t=2 | OMP t=4 | OMP t=8 |
-|----------|---------|---------|---------|---------|
-| com-dblp | 0.08422 | 0.05680 | 0.03323 | 0.02474 |
-| youtube  | 0.51088 | 0.32650 | 0.21316 | 0.19958 |
+Team Musilaj
+
+Haşim Sait Göktan<br>
+Efe Öztaban<br>
+Burakcan Kazım Yeşil<br>
+
+Category 1 (Single Node, Multiple Core) 1st Place
 
 Results on truba:
-| graph    | OMP t=10 | OMP t=20 | OMP t=30 | OMP t=40 |
+| graph    | t=10 | t=20 | t=30 | t=40 |
 |----------|----------|----------|----------|----------|
 | com-dblp |  0.02582 |  0.03861 |  0.05826 |  0.04880 |
-| youtube  |  0.10182 |  0.08554 |  0.11841 |  0.10434 |
+| youtube  |  0.10182 |  0.08554 |  0.11841 |  0.10134 |
